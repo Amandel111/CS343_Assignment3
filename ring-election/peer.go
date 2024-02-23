@@ -29,8 +29,8 @@ type RingNode struct {
 // node receiving the RingVote to decide whether to vote for the candidate
 // in question.
 type RingVote struct {
-	candidateID int
-	isTerminal  bool
+	CandidateID int
+	IsTerminal  bool
 }
 
 // ServerConnection represents a connection to another node in the Raft cluster.
@@ -53,20 +53,22 @@ func (node *RingNode) RequestVote(receivedVote RingVote, acknowledge *string) er
 	node.mutex.Lock()
 	defer node.mutex.Unlock()
 
-	fmt.Println("Vote message received for ", receivedVote.candidateID)
+	fmt.Println("Vote message received for ", receivedVote.CandidateID)
+
+	ackReply := "nil"
 
 	// Leader has been identified
-	if receivedVote.isTerminal {
-		if node.leaderID != receivedVote.candidateID {
-			node.leaderID = receivedVote.candidateID
-			fmt.Println("Leader has been elected: ", receivedVote.candidateID)
+	if receivedVote.IsTerminal {
+		if node.leaderID != receivedVote.CandidateID {
+			node.leaderID = receivedVote.CandidateID
+			fmt.Println("Leader has been elected: ", receivedVote.CandidateID)
 			// Pass result of the election to nextNode
 			theNextVote := RingVote{
-				candidateID: receivedVote.candidateID,
-				isTerminal:  receivedVote.isTerminal,
+				CandidateID: receivedVote.CandidateID,
+				IsTerminal:  receivedVote.IsTerminal,
 			}
 			go func(server ServerConnection) {
-				err := server.rpcConnection.Call("RingNode.RequestVote", theNextVote, "-1")
+				err := server.rpcConnection.Call("RingNode.RequestVote", theNextVote, &ackReply)
 				if err != nil {
 					return
 				}
@@ -77,17 +79,17 @@ func (node *RingNode) RequestVote(receivedVote RingVote, acknowledge *string) er
 		return nil
 	}
 	// Reject vote request if received candidateID is smaller
-	if receivedVote.candidateID < node.selfID {
-		fmt.Println("Received a vote from lower Id of ", receivedVote.candidateID)
+	if receivedVote.CandidateID < node.selfID {
+		fmt.Println("Received a vote from lower Id of ", receivedVote.CandidateID)
 		// If node have not already nominated itself as leader,
 		// then pass nomiation of selfID to nextNode
 		if !node.nominatedSelf {
 			theNextVote := RingVote{
-				candidateID: node.selfID,
-				isTerminal:  false,
+				CandidateID: node.selfID,
+				IsTerminal:  false,
 			}
 			go func(server ServerConnection) {
-				err := server.rpcConnection.Call("RingNode.RequestVote", theNextVote, "-1")
+				err := server.rpcConnection.Call("RingNode.RequestVote", theNextVote, &ackReply)
 				if err != nil {
 					return
 				}
@@ -97,15 +99,15 @@ func (node *RingNode) RequestVote(receivedVote RingVote, acknowledge *string) er
 		}
 		return nil
 	}
-	if receivedVote.candidateID > node.selfID {
-		fmt.Println("Received a vote from higher Id of ", receivedVote.candidateID)
+	if receivedVote.CandidateID > node.selfID {
+		fmt.Println("Received a vote from higher Id of ", receivedVote.CandidateID)
 		// Pass nomiation of candidateID to nextNode
 		theNextVote := RingVote{
-			candidateID: receivedVote.candidateID,
-			isTerminal:  false,
+			CandidateID: receivedVote.CandidateID,
+			IsTerminal:  false,
 		}
 		go func(server ServerConnection) {
-			err := server.rpcConnection.Call("RingNode.RequestVote", theNextVote, "-1")
+			err := server.rpcConnection.Call("RingNode.RequestVote", theNextVote, &ackReply)
 			if err != nil {
 				return
 			}
@@ -119,11 +121,11 @@ func (node *RingNode) RequestVote(receivedVote RingVote, acknowledge *string) er
 	fmt.Println("Received self vote again. Yay, node is leader!")
 	// Pass nomiation of candidateID to nextNode
 	theNextVote := RingVote{
-		candidateID: receivedVote.candidateID,
-		isTerminal:  true,
+		CandidateID: receivedVote.CandidateID,
+		IsTerminal:  true,
 	}
 	go func(server ServerConnection) {
-		err := server.rpcConnection.Call("RingNode.RequestVote", theNextVote, "-1")
+		err := server.rpcConnection.Call("RingNode.RequestVote", theNextVote, &ackReply)
 		if err != nil {
 			return
 		}
@@ -155,8 +157,8 @@ func (node *RingNode) LeaderElection() {
 
 		// Initialize election by incrementing term and voting for self
 		arguments := RingVote{
-			candidateID: node.selfID,
-			isTerminal:  false,
+			CandidateID: node.selfID,
+			IsTerminal:  false,
 		}
 		ackReply := "nil"
 
@@ -170,15 +172,13 @@ func (node *RingNode) LeaderElection() {
 		THOERY: we think the rewuest should only be made once, but because it is in a for loop,  we are making the rpc request over and over again,
 		 rewriting each previous request, until the eleciton times out.
 		*/
-
-		// Should it wait before calling a go routine?
 		fmt.Println("Requesting votes from ", node.nextNode.serverID, node.nextNode.Address)
 		go func(server ServerConnection) {
 			err := server.rpcConnection.Call("RingNode.RequestVote", arguments, &ackReply)
 			if err != nil {
 				return
 			}
-		}(node.nextNode) //what is this (node.nectNode?)
+		}(node.nextNode)
 
 		// If you want leader election to be restarted periodically,
 		// Uncomment the next line
