@@ -58,6 +58,9 @@ func (node *RingNode) RequestVote(receivedVote RingVote, acknowledge *string) er
 	ackReply := "nil"
 
 	// Leader has been identified
+	var wg sync.WaitGroup
+	wg.Add(1)
+
 	if receivedVote.IsTerminal {
 		if node.leaderID != receivedVote.CandidateID {
 			node.leaderID = receivedVote.CandidateID
@@ -116,7 +119,6 @@ func (node *RingNode) RequestVote(receivedVote RingVote, acknowledge *string) er
 		// node.nextNode.rpcConnection.Call("RingNode.RequestVote", theNextVote, -1)
 		return nil
 	}
-
 	// Final case is when node receives its own nomination
 	fmt.Println("Received self vote again. Yay, node is leader!")
 	// Pass nomiation of candidateID to nextNode
@@ -132,6 +134,7 @@ func (node *RingNode) RequestVote(receivedVote RingVote, acknowledge *string) er
 	}(node.nextNode)
 	// Synchronous version
 	// node.nextNode.rpcConnection.Call("RingNode.RequestVote", theNextVote, -1)
+	wg.Wait()
 
 	return nil
 }
@@ -139,53 +142,54 @@ func (node *RingNode) RequestVote(receivedVote RingVote, acknowledge *string) er
 func (node *RingNode) LeaderElection() {
 	// This is an option to limit who can start the leader election
 	// Recommended if you want only a specific process to start the election
-	// if node.selfID != 2 {
-	// 	return
-	// }
+	if node.selfID != 2 {
+		return
+	}
 
-	for {
-		// Wait for election timeout
-		// Uncomment this if you decide to do periodic leader election
+	//for {
+	// Wait for election timeout
+	// Uncomment this if you decide to do periodic leader election
 
-		// <-node.electionTimeout.C
+	// <-node.electionTimeout.C
 
-		// Check if node is already leader so loop does not continue
-		if node.leaderID == node.selfID {
-			fmt.Println("Ending leader election because I am now leader")
+	// Check if node is already leader so loop does not continue
+	if node.leaderID == node.selfID {
+		fmt.Println("Ending leader election because I am now leader")
+		return
+	}
+
+	// Initialize election by incrementing term and voting for self
+	arguments := RingVote{
+		CandidateID: node.selfID,
+		IsTerminal:  false,
+	}
+	ackReply := "nil"
+
+	// Sending nomination message
+
+	/*OH points
+	1. confirm that it is fine for conenctions to fail until we manually run each localhost/node
+	2. we think the :"requesting votes from..." should only print out one time, so we think there is an issue with the for loop
+	3. Perhaps we should add a waitgroup/mody the goroutine so that the for loop pauses until a request is finished
+	4. where is the timeout code
+	THOERY: we think the rewuest should only be made once, but because it is in a for loop,  we are making the rpc request over and over again,
+	 rewriting each previous request, until the eleciton times out.
+	*/
+	fmt.Println("Requesting votes from ", node.nextNode.serverID, node.nextNode.Address)
+	go func(server ServerConnection) {
+		err := server.rpcConnection.Call("RingNode.RequestVote", arguments, &ackReply)
+		if err != nil {
 			return
 		}
+	}(node.nextNode)
 
-		// Initialize election by incrementing term and voting for self
-		arguments := RingVote{
-			CandidateID: node.selfID,
-			IsTerminal:  false,
-		}
-		ackReply := "nil"
+	// If you want leader election to be restarted periodically,
+	// Uncomment the next line
+	// I do not recommend when debugging
 
-		// Sending nomination message
+	// node.resetElectionTimeout()
+	//}
 
-		/*OH points
-		1. confirm that it is fine for conenctions to fail until we manually run each localhost/node
-		2. we think the :"requesting votes from..." should only print out one time, so we think there is an issue with the for loop
-		3. Perhaps we should add a waitgroup/mody the goroutine so that the for loop pauses until a request is finished
-		4. where is the timeout code
-		THOERY: we think the rewuest should only be made once, but because it is in a for loop,  we are making the rpc request over and over again,
-		 rewriting each previous request, until the eleciton times out.
-		*/
-		fmt.Println("Requesting votes from ", node.nextNode.serverID, node.nextNode.Address)
-		go func(server ServerConnection) {
-			err := server.rpcConnection.Call("RingNode.RequestVote", arguments, &ackReply)
-			if err != nil {
-				return
-			}
-		}(node.nextNode)
-
-		// If you want leader election to be restarted periodically,
-		// Uncomment the next line
-		// I do not recommend when debugging
-
-		// node.resetElectionTimeout()
-	}
 }
 
 // resetElectionTimeout resets the election timeout to a new random duration.
