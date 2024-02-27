@@ -16,14 +16,14 @@ import (
 // RingNode represents a single node in the cluster, providing the
 // necessary methods to handle RPCs.
 type RingNode struct {
-	mutex           sync.Mutex
-	selfID          int
-	leaderID        int
-	myPort          string
+	mutex    sync.Mutex
+	selfID   int
+	leaderID int
+	myPort   string
 	//peerConnections ServerConnections
 	nominatedSelf   bool
 	electionTimeout *time.Timer
-	peerConnections  map[int]*rpc.Client
+	peerConnections map[int]*rpc.Client
 }
 
 // RingVote contains the candidate's information that is needed for the
@@ -34,9 +34,9 @@ type RingVote struct {
 	IsTerminal  bool
 }
 
-//ServerConnection represents a connection to another node in the Raft cluster.
+// ServerConnection represents a connection to another node in the Raft cluster.
 type ServerConnection struct {
-	serverID      int
+	serverID       int
 	rpcConnections []*rpc.Client
 }
 
@@ -51,9 +51,9 @@ type ServerConnection struct {
 // if candidateID is the same as serverID, then election won, and server can confirm its leadership
 func (node *RingNode) RequestVote(receivedVote RingVote, acknowledge *string) error {
 	// when request is received
-	// send OK acknowledgement 
+	// send OK acknowledgement
 	// contact higher nodes
-	
+
 	node.mutex.Lock()
 	defer node.mutex.Unlock()
 
@@ -145,7 +145,7 @@ func (node *RingNode) RequestVote(receivedVote RingVote, acknowledge *string) er
 	return nil*/
 }
 
-func (node *RingNode) LeaderElection(p2pConnection map[int]*rpc.Client) {
+func (node *RingNode) LeaderElection(p2pConnection map[int]*rpc.Client) { // we don't need to pass p2pConnection
 	// This is an option to limit who can start the leader election
 	// Recommended if you want only a specific process to start the election
 	if node.selfID != 2 {
@@ -156,21 +156,22 @@ func (node *RingNode) LeaderElection(p2pConnection map[int]*rpc.Client) {
 		CandidateID: node.selfID,
 		IsTerminal:  false,
 	}
-	
+
 	ackReply := "nil"
 
-	for nodeID, serverConnection := range p2pConnection{
-		if (nodeID > node.selfID){
-			fmt.Println("the node id ", nodeID, "is higher than my id ", node.selfID);
+	//for nodeID, serverConnection := range p2pConnection{
+	for nodeID, serverConnection := range node.peerConnections {
+		if nodeID > node.selfID {
+			fmt.Println("the node id ", nodeID, "is higher than my id ", node.selfID)
 
 			fmt.Println("Alerting higher node ", nodeID)
 			go func(serverConnection *rpc.Client) {
-				err := server.rpcConnection.Call("RingNode.RequestVote", arguments, &ackReply)
+				err := serverConnection.Call("RingNode.RequestVote", arguments, &ackReply)
 				if err != nil {
 					return
 				}
 			}(serverConnection)
-		}else{
+		} else {
 			continue
 			//fmt.Println("the node id ", nodeID, "is lower than my id ", node.selfID);
 			//fmt.Println(nodeConnection)
@@ -183,36 +184,36 @@ func (node *RingNode) LeaderElection(p2pConnection map[int]*rpc.Client) {
 	// Uncomment this if you decide to do periodic leader election
 
 	// <-node.electionTimeout.C
-/*
-	// Check if node is already leader so loop does not continue
-	if node.leaderID == node.selfID {
-		fmt.Println("Ending leader election because I am now leader")
-		return
-	}
-
-	// Initialize election by incrementing term and voting for self
-	arguments := RingVote{
-		CandidateID: node.selfID,
-		IsTerminal:  false,
-	}
-	ackReply := "nil"
-
-	// Sending nomination message
-
-	fmt.Println("Requesting votes from ", node.nextNode.serverID, node.nextNode.Address)
-	go func(server ServerConnection) {
-		err := server.rpcConnection.Call("RingNode.RequestVote", arguments, &ackReply)
-		if err != nil {
+	/*
+		// Check if node is already leader so loop does not continue
+		if node.leaderID == node.selfID {
+			fmt.Println("Ending leader election because I am now leader")
 			return
 		}
-	}(node.nextNode)
 
-	// If you want leader election to be restarted periodically,
-	// Uncomment the next line
-	// I do not recommend when debugging
+		// Initialize election by incrementing term and voting for self
+		arguments := RingVote{
+			CandidateID: node.selfID,
+			IsTerminal:  false,
+		}
+		ackReply := "nil"
 
-	// node.resetElectionTimeout()
-	//}*/
+		// Sending nomination message
+
+		fmt.Println("Requesting votes from ", node.nextNode.serverID, node.nextNode.Address)
+		go func(server ServerConnection) {
+			err := server.rpcConnection.Call("RingNode.RequestVote", arguments, &ackReply)
+			if err != nil {
+				return
+			}
+		}(node.nextNode)
+
+		// If you want leader election to be restarted periodically,
+		// Uncomment the next line
+		// I do not recommend when debugging
+
+		// node.resetElectionTimeout()
+		//}*/
 
 }
 
@@ -248,8 +249,8 @@ func main() {
 	defer file.Close()
 
 	node := &RingNode{
-		selfID:        myID,
-		leaderID:      -1,
+		selfID:   myID,
+		leaderID: -1,
 		//nextNode:      ServerConnection{},
 		nominatedSelf: false,
 		mutex:         sync.Mutex{},
@@ -320,7 +321,7 @@ func main() {
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go node.LeaderElection(node.peerConnections) // Concurrent leader election, which can be made non-stop with timers
-	wg.Wait()                // Waits forever, so main process does not stop
+	wg.Wait()                                    // Waits forever, so main process does not stop
 }
 
 /*
@@ -333,7 +334,7 @@ Consider node i. For each node that i is connected t:
 3. if node i receives no comfirmation before its timer runs out, it must be the leader
 	at this point, node i sends a message to every other node, including the failed nodes, saying it is the new leader
 
-TODOs: 
+TODOs:
 * Make the node send a message to nodes with higher id's
 * Make higher id's send OK
 * Figure out the time out
