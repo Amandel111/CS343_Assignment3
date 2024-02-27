@@ -166,15 +166,6 @@ func (node *RingNode) LeaderElection() {
 	ackReply := "nil"
 
 	// Sending nomination message
-
-	/*OH points
-	1. confirm that it is fine for conenctions to fail until we manually run each localhost/node
-	2. we think the :"requesting votes from..." should only print out one time, so we think there is an issue with the for loop
-	3. Perhaps we should add a waitgroup/mody the goroutine so that the for loop pauses until a request is finished
-	4. where is the timeout code
-	THOERY: we think the rewuest should only be made once, but because it is in a for loop,  we are making the rpc request over and over again,
-	 rewriting each previous request, until the eleciton times out.
-	*/
 	fmt.Println("Requesting votes from ", node.nextNode.serverID, node.nextNode.Address)
 	go func(server ServerConnection) {
 		err := server.rpcConnection.Call("RingNode.RequestVote", arguments, &ackReply)
