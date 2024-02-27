@@ -53,11 +53,10 @@ func (node *RingNode) RequestVote(receivedVote RingVote, acknowledge *string) er
 	// when request is received
 	// send OK acknowledgement
 	// contact higher nodes
+	fmt.Println("alert message received for ", receivedVote.CandidateID)
 
 	node.mutex.Lock()
 	defer node.mutex.Unlock()
-
-	fmt.Println("alert message received for ", receivedVote.CandidateID)
 
 	//ackReply := "nil"
 
@@ -145,7 +144,7 @@ func (node *RingNode) RequestVote(receivedVote RingVote, acknowledge *string) er
 	return nil*/
 }
 
-func (node *RingNode) LeaderElection(p2pConnection map[int]*rpc.Client) { // we don't need to pass p2pConnection
+func (node *RingNode) LeaderElection() { // we don't need to pass p2pConnection
 	// This is an option to limit who can start the leader election
 	// Recommended if you want only a specific process to start the election
 	if node.selfID != 2 {
@@ -159,15 +158,18 @@ func (node *RingNode) LeaderElection(p2pConnection map[int]*rpc.Client) { // we 
 
 	ackReply := "nil"
 
+	fmt.Println("peerConnections ", node.peerConnections)
 	//for nodeID, serverConnection := range p2pConnection{
 	for nodeID, serverConnection := range node.peerConnections {
 		if nodeID > node.selfID {
+			// fmt.Println("server connection outside go call ", serverConnection)
 			fmt.Println("the node id ", nodeID, "is higher than my id ", node.selfID)
-
 			fmt.Println("Alerting higher node ", nodeID)
 			go func(serverConnection *rpc.Client) {
+				fmt.Println("server connection: ", node.peerConnections[nodeID])
 				err := serverConnection.Call("RingNode.RequestVote", arguments, &ackReply)
 				if err != nil {
+					fmt.Println("error: ", err)
 					return
 				}
 			}(serverConnection)
@@ -320,8 +322,8 @@ func main() {
 
 	var wg sync.WaitGroup
 	wg.Add(1)
-	go node.LeaderElection(node.peerConnections) // Concurrent leader election, which can be made non-stop with timers
-	wg.Wait()                                    // Waits forever, so main process does not stop
+	go node.LeaderElection() // Concurrent leader election, which can be made non-stop with timers
+	wg.Wait()                // Waits forever, so main process does not stop
 }
 
 /*
