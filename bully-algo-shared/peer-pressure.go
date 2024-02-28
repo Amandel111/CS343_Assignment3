@@ -29,9 +29,10 @@ type RingNode struct {
 // RingVote contains the candidate's information that is needed for the
 // node receiving the RingVote to decide whether to vote for the candidate
 // in question.
-type RingVote struct {
-	CandidateID int
-	IsTerminal  bool
+type PeerMessage struct {
+	messengerID int
+	//IsTerminalLeader:  false,
+	confirmedNotLeader bool
 }
 
 // ServerConnection represents a connection to another node in the Raft cluster.
@@ -49,12 +50,48 @@ type ServerConnection struct {
 // if the candidateID received is higher that server's own ID, then vote is accepted and passed
 // if less than server's own ID, the vote is ignored
 // if candidateID is the same as serverID, then election won, and server can confirm its leadership
-func (node *RingNode) RequestVote(receivedVote RingVote, acknowledge *string) error {
+func (node *RingNode) RequestVote(receivedMessage PeerMessage, acknowledge *string) error {
 	// when request is received
 	// send OK acknowledgement
 	// contact higher nodes
-	fmt.Println("alert message received for ", receivedVote.CandidateID)
+	prevID := receivedMessage.messengerID
+	arguments := PeerMessage{
+		messengerID:        node.selfID,
+		confirmedNotLeader: false, //if a node's timer runs out and this is false, that node must be the leader
+		//message
+	}
 
+	ackReply := "nil"
+
+	fmt.Println("alert message received for ", prevID)
+	if prevID < node.selfID {
+		//send confirmation back
+		go func(serverConnection *rpc.Client) {
+			err := node.peerConnections[prevID].Call("RingNode.RequestVote", arguments, &ackReply)
+			if err != nil {
+				return
+			}
+		}(node.peerConnections[prevID])
+
+		/*//alert higher nodes
+		for nodeID, serverConnection := range node.peerConnections {
+			if nodeID > node.selfID {
+				// fmt.Println("server connection outside go call ", serverConnection)
+				fmt.Println("the node id ", nodeID, "is higher than my id ", node.selfID)
+				fmt.Println("Alerting higher node ", nodeID)
+				go func(serverConnection *rpc.Client) {
+					fmt.Println("server connection: ", node.peerConnections[nodeID])
+					err := serverConnection.Call("RingNode.RequestVote", arguments, &ackReply)
+					if err != nil {
+						fmt.Println("error: ", err)
+						return
+					}
+				}(serverConnection)*/
+
+	} else {
+		//if the node we received a request from is higher, that means we have received confirmation from a higher vote, so we know that this
+		//node cannot be the leader
+	}
 	node.mutex.Lock()
 	defer node.mutex.Unlock()
 
@@ -65,97 +102,19 @@ func (node *RingNode) RequestVote(receivedVote RingVote, acknowledge *string) er
 	wg.Add(1)
 
 	return nil
-
-	/*if receivedVote.IsTerminal {
-		if node.leaderID != receivedVote.CandidateID {
-			node.leaderID = receivedVote.CandidateID
-			fmt.Println("Leader has been elected: ", receivedVote.CandidateID)
-			// Pass result of the election to nextNode
-			theNextVote := RingVote{
-				CandidateID: receivedVote.CandidateID,
-				IsTerminal:  receivedVote.IsTerminal,
-			}
-			go func(server ServerConnection) {
-				err := server.rpcConnection.Call("RingNode.RequestVote", theNextVote, &ackReply)
-				if err != nil {
-					return
-				}
-			}(node.nextNode)
-			// Synchronous version
-			// node.nextNode.rpcConnection.Call("RingNode.RequestVote", theNextVote, -1)
-		}
-		return nil
-	}
-	// Reject vote request if received candidateID is smaller
-	if receivedVote.CandidateID < node.selfID {
-		fmt.Println("Received a vote from lower Id of ", receivedVote.CandidateID)
-		// If node have not already nominated itself as leader,
-		// then pass nomiation of selfID to nextNode
-		if !node.nominatedSelf {
-			theNextVote := RingVote{
-				CandidateID: node.selfID,
-				IsTerminal:  false,
-			}
-			go func(server ServerConnection) {
-				err := server.rpcConnection.Call("RingNode.RequestVote", theNextVote, &ackReply)
-				if err != nil {
-					return
-				}
-			}(node.nextNode)
-			// Synchronous version
-			// node.nextNode.rpcConnection.Call("RingNode.RequestVote", theNextVote, -1)
-		}
-		return nil
-	}
-	if receivedVote.CandidateID > node.selfID {
-		fmt.Println("Received a vote from higher Id of ", receivedVote.CandidateID)
-		// Pass nomiation of candidateID to nextNode
-		theNextVote := RingVote{
-			CandidateID: receivedVote.CandidateID,
-			IsTerminal:  false,
-		}
-		go func(server ServerConnection) {
-			err := server.rpcConnection.Call("RingNode.RequestVote", theNextVote, &ackReply)
-			if err != nil {
-				return
-			}
-		}(node.nextNode)
-		// Synchronous version
-		// node.nextNode.rpcConnection.Call("RingNode.RequestVote", theNextVote, -1)
-		return nil
-	}
-	// Final case is when node receives its own nomination
-	fmt.Println("Received self vote again. Yay, node is leader!")
-	// Pass nomiation of candidateID to nextNode
-	theNextVote := RingVote{
-		CandidateID: receivedVote.CandidateID,
-		IsTerminal:  true,
-	}
-	go func(server ServerConnection) {
-		err := server.rpcConnection.Call("RingNode.RequestVote", theNextVote, &ackReply)
-		if err != nil {
-			return
-		}
-	}(node.nextNode)
-	// Synchronous version
-	// node.nextNode.rpcConnection.Call("RingNode.RequestVote", theNextVote, -1)
-	wg.Wait()
-
-	return nil*/
 }
 
 func (node *RingNode) LeaderElection() { // we don't need to pass p2pConnection
 	// This is an option to limit who can start the leader election
 	// Recommended if you want only a specific process to start the election
-	if node.selfID != 2 {
+	if node.selfID != 1 {
 		return
 	}
 
-	arguments := RingVote{
-		CandidateID: node.selfID,
-		IsTerminal:  false,
+	arguments := PeerMessage{
+		messengerID:        node.selfID,
+		confirmedNotLeader: false, //if a node's timer runs out and this is false, that node must be the leader
 	}
-
 	ackReply := "nil"
 
 	fmt.Println("peerConnections ", node.peerConnections)
@@ -173,10 +132,6 @@ func (node *RingNode) LeaderElection() { // we don't need to pass p2pConnection
 					return
 				}
 			}(serverConnection)
-		} else {
-			continue
-			//fmt.Println("the node id ", nodeID, "is lower than my id ", node.selfID);
-			//fmt.Println(nodeConnection)
 		}
 	}
 
