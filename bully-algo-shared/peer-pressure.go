@@ -30,9 +30,9 @@ type RingNode struct {
 // node receiving the RingVote to decide whether to vote for the candidate
 // in question.
 type PeerMessage struct {
-	messengerID int
+	MessengerID int
 	//IsTerminalLeader:  false,
-	confirmedNotLeader bool
+	ConfirmedNotLeader bool
 }
 
 // ServerConnection represents a connection to another node in the Raft cluster.
@@ -54,26 +54,30 @@ func (node *RingNode) RequestVote(receivedMessage PeerMessage, acknowledge *stri
 	// when request is received
 	// send OK acknowledgement
 	// contact higher nodes
-	prevID := receivedMessage.messengerID
+	node.mutex.Lock()
+	defer node.mutex.Unlock()
+
+	prevID := receivedMessage.MessengerID
 	arguments := PeerMessage{
-		messengerID:        node.selfID,
-		confirmedNotLeader: false, //if a node's timer runs out and this is false, that node must be the leader
+		MessengerID:        node.selfID,
+		ConfirmedNotLeader: false, //if a node's timer runs out and this is false, that node must be the leader
 		//message
 	}
 
 	ackReply := "nil"
 
-	fmt.Println("alert message received for ", prevID)
 	if prevID < node.selfID {
 		//send confirmation back
-		go func(serverConnection *rpc.Client) {
-			err := node.peerConnections[prevID].Call("RingNode.RequestVote", arguments, &ackReply)
-			if err != nil {
-				return
-			}
-		}(node.peerConnections[prevID])
+		fmt.Print("received alert from node ", prevID)
+		// go func(serverConnection *rpc.Client) {
+		// 	fmt.Print("sending confirmation back")
+		// 	err := node.peerConnections[prevID].Call("RingNode.RequestVote", arguments, &ackReply)
+		// 	if err != nil {
+		// 		return
+		// 	}
+		// }(node.peerConnections[prevID])
 
-		/*//alert higher nodes
+		//alert higher nodes
 		for nodeID, serverConnection := range node.peerConnections {
 			if nodeID > node.selfID {
 				// fmt.Println("server connection outside go call ", serverConnection)
@@ -86,14 +90,19 @@ func (node *RingNode) RequestVote(receivedMessage PeerMessage, acknowledge *stri
 						fmt.Println("error: ", err)
 						return
 					}
-				}(serverConnection)*/
+				}(serverConnection)
 
-	} else {
-		//if the node we received a request from is higher, that means we have received confirmation from a higher vote, so we know that this
-		//node cannot be the leader
+			}
+		}
+
 	}
-	node.mutex.Lock()
-	defer node.mutex.Unlock()
+
+	if prevID > node.selfID {
+		fmt.Println("alert message received for ", prevID)
+		//if the node we received a request from is higher, that means we have received confirmation from a higher vote, so we know that this
+		//node cannot be the leader, disable timer and set leader bool
+
+	}
 
 	//ackReply := "nil"
 
@@ -112,8 +121,8 @@ func (node *RingNode) LeaderElection() { // we don't need to pass p2pConnection
 	}
 
 	arguments := PeerMessage{
-		messengerID:        node.selfID,
-		confirmedNotLeader: false, //if a node's timer runs out and this is false, that node must be the leader
+		MessengerID:        node.selfID,
+		ConfirmedNotLeader: false, //if a node's timer runs out and this is false, that node must be the leader
 	}
 	ackReply := "nil"
 
