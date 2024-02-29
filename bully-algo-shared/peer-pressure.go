@@ -15,6 +15,9 @@ import (
 
 // RingNode represents a single node in the cluster, providing the
 // necessary methods to handle RPCs.
+
+var nodeList []*RingNode
+
 type RingNode struct {
 	mutex    sync.Mutex
 	selfID   int
@@ -32,7 +35,7 @@ type RingNode struct {
 type PeerMessage struct {
 	MessengerID int
 	//IsTerminalLeader:  false,
-	ConfirmedNotLeader bool
+	//ConfirmedNotLeader bool
 }
 
 // ServerConnection represents a connection to another node in the Raft cluster.
@@ -59,14 +62,27 @@ func (node *RingNode) RequestVote(receivedMessage PeerMessage, acknowledge *stri
 
 	prevID := receivedMessage.MessengerID
 	arguments := PeerMessage{
-		MessengerID:        node.selfID,
-		ConfirmedNotLeader: false, //if a node's timer runs out and this is false, that node must be the leader
+		MessengerID: node.selfID,
+		// ConfirmedNotLeader: false, //if a node's timer runs out and this is false, that node must be the leader
 		//message
 	}
 
 	ackReply := "nil"
 
 	if prevID < node.selfID {
+		// do we need to check if the timer has already started?
+		//also do we start timer before we alert higher nodes or just after we hear from smaller nodes
+		//if node.electionTimeout == nil {
+		StartTimer(node)
+		go func() {
+			//thread for each node checking for timeout
+			//lock vs unlock here?
+			<-node.electionTimeout.C
+
+			// Printed when timer is fired
+			fmt.Println("timer inactivated")
+		}()
+		//}
 		//send confirmation back
 		fmt.Print("received alert from node ", prevID)
 		// go func(serverConnection *rpc.Client) {
@@ -90,17 +106,12 @@ func (node *RingNode) RequestVote(receivedMessage PeerMessage, acknowledge *stri
 						fmt.Println("error: ", err)
 						return
 					}
+					//if there is no error, must have received confirmaiton from higher node, can't be leader
+					//node.electionTimeout.Stop() //stop timer if the node hears back
 				}(serverConnection)
 
 			}
 		}
-
-	}
-
-	if prevID > node.selfID {
-		fmt.Println("alert message received for ", prevID)
-		//if the node we received a request from is higher, that means we have received confirmation from a higher vote, so we know that this
-		//node cannot be the leader, disable timer and set leader bool
 
 	}
 
@@ -113,16 +124,51 @@ func (node *RingNode) RequestVote(receivedMessage PeerMessage, acknowledge *stri
 	return nil
 }
 
+func StartTimer(node *RingNode) {
+	node.mutex.Lock()
+	defer node.mutex.Unlock()
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	tRandom := time.Duration(r.Intn(150)+151) * time.Millisecond
+	node.electionTimeout = time.NewTimer(tRandom)
+	fmt.Println("Timer started")
+
+}
+
+func CheckNodeTimers() {
+	//call this as a thread working continuosuly in the background
+	for i := 0; i < len(nodeList); {
+		//currNode := nodeList[i]
+		//<- currNode.electionTimeout.C{
+		//	fmt.Println()
+		// if (currNode.electionTimeout.C){
+		// }
+	}
+}
+
 func (node *RingNode) LeaderElection() { // we don't need to pass p2pConnection
 	// This is an option to limit who can start the leader election
 	// Recommended if you want only a specific process to start the election
 	if node.selfID != 1 {
 		return
 	}
+	StartTimer(node)
+
+	go func() {
+		//thread for each node checking for timeout
+		//lock vs unlock here?
+		<-node.electionTimeout.C
+
+		// Printed when timer is fired
+		fmt.Println("timer inactivated")
+	}()
+
+	//fmt.Println("node timer: ", node.electionTimeout)
+	node.mutex.Lock()
+	defer node.mutex.Unlock()
 
 	arguments := PeerMessage{
-		MessengerID:        node.selfID,
-		ConfirmedNotLeader: false, //if a node's timer runs out and this is false, that node must be the leader
+		MessengerID: node.selfID,
+		// ConfirmedNotLeader: false, //if a node's timer runs out and this is false, that node must be the leader
 	}
 	ackReply := "nil"
 
@@ -134,52 +180,17 @@ func (node *RingNode) LeaderElection() { // we don't need to pass p2pConnection
 			fmt.Println("the node id ", nodeID, "is higher than my id ", node.selfID)
 			fmt.Println("Alerting higher node ", nodeID)
 			go func(serverConnection *rpc.Client) {
-				fmt.Println("server connection: ", node.peerConnections[nodeID])
+				//fmt.Println("server connection: ", node.peerConnections[nodeID])
 				err := serverConnection.Call("RingNode.RequestVote", arguments, &ackReply)
 				if err != nil {
 					fmt.Println("error: ", err)
 					return
 				}
+				//node.electionTimeout.Stop() //stop timer if the node hears back
+				//fmt.Println("Timer stopped!")
 			}(serverConnection)
 		}
 	}
-
-	//return nil
-	//for {
-	// Wait for election timeout
-	// Uncomment this if you decide to do periodic leader election
-
-	// <-node.electionTimeout.C
-	/*
-		// Check if node is already leader so loop does not continue
-		if node.leaderID == node.selfID {
-			fmt.Println("Ending leader election because I am now leader")
-			return
-		}
-
-		// Initialize election by incrementing term and voting for self
-		arguments := RingVote{
-			CandidateID: node.selfID,
-			IsTerminal:  false,
-		}
-		ackReply := "nil"
-
-		// Sending nomination message
-
-		fmt.Println("Requesting votes from ", node.nextNode.serverID, node.nextNode.Address)
-		go func(server ServerConnection) {
-			err := server.rpcConnection.Call("RingNode.RequestVote", arguments, &ackReply)
-			if err != nil {
-				return
-			}
-		}(node.nextNode)
-
-		// If you want leader election to be restarted periodically,
-		// Uncomment the next line
-		// I do not recommend when debugging
-
-		// node.resetElectionTimeout()
-		//}*/
 
 }
 
@@ -275,6 +286,7 @@ func main() {
 		fmt.Printf("Connected to peer %d at %s\n", id, lines[id])
 	}
 	node.peerConnections = p2pConnections
+	nodeList = append(nodeList, node)
 
 	// Start the election using a timer
 	// Uncomment the next 3 lines, if you want leader election to be initiated periodically
@@ -289,21 +301,3 @@ func main() {
 	go node.LeaderElection() // Concurrent leader election, which can be made non-stop with timers
 	wg.Wait()                // Waits forever, so main process does not stop
 }
-
-/*
-each node will connect to every other node:
-Consider node i. For each node that i is connected t:
-1. compare if its id is higher or lower
-	if lwowr: continue
-	if higher: send message alerting the leader failure, then for thus higher node repeat the process so it communicates to each higher node
-2. node i waits for comfirmation back from all its higher nodes. Once it receives confirmation, it knows itt is not the leader
-3. if node i receives no comfirmation before its timer runs out, it must be the leader
-	at this point, node i sends a message to every other node, including the failed nodes, saying it is the new leader
-
-TODOs:
-* Make the node send a message to nodes with higher id's
-* Make higher id's send OK
-* Figure out the time out
-*once node i receives confimration from a higher node, it is just waiting for election reuslts because it can't be the leader
-
-*/
