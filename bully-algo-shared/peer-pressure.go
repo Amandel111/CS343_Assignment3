@@ -73,15 +73,15 @@ func (node *RingNode) RequestVote(receivedMessage PeerMessage, acknowledge *stri
 		// do we need to check if the timer has already started?
 		//also do we start timer before we alert higher nodes or just after we hear from smaller nodes
 		//if node.electionTimeout == nil {
-		StartTimer(node)
-		go func() {
+		//StartTimer(node)
+		/*go func() {
 			//thread for each node checking for timeout
 			//lock vs unlock here?
 			<-node.electionTimeout.C
 
 			// Printed when timer is fired
 			fmt.Println("timer inactivated")
-		}()
+		}()*/
 		//}
 		//send confirmation back
 		fmt.Print("received alert from node ", prevID)
@@ -125,8 +125,8 @@ func (node *RingNode) RequestVote(receivedMessage PeerMessage, acknowledge *stri
 }
 
 func StartTimer(node *RingNode) {
-	node.mutex.Lock()
-	defer node.mutex.Unlock()
+	//node.mutex.Lock() //dont need to protect because it will be reset every time a node reaches out to it
+	//defer node.mutex.Unlock()
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	tRandom := time.Duration(r.Intn(150)+151) * time.Millisecond
 	node.electionTimeout = time.NewTimer(tRandom)
@@ -145,24 +145,13 @@ func CheckNodeTimers() {
 	}
 }
 
-func (node *RingNode) LeaderElection() { // we don't need to pass p2pConnection
-	// This is an option to limit who can start the leader election
-	// Recommended if you want only a specific process to start the election
+func (node *RingNode) LeaderElection() { 
 	if node.selfID != 1 {
 		return
 	}
-	StartTimer(node)
 
-	go func() {
-		//thread for each node checking for timeout
-		//lock vs unlock here?
-		<-node.electionTimeout.C
+	receivedConfirmation := false
 
-		// Printed when timer is fired
-		fmt.Println("timer inactivated")
-	}()
-
-	//fmt.Println("node timer: ", node.electionTimeout)
 	node.mutex.Lock()
 	defer node.mutex.Unlock()
 
@@ -184,15 +173,29 @@ func (node *RingNode) LeaderElection() { // we don't need to pass p2pConnection
 				err := serverConnection.Call("RingNode.RequestVote", arguments, &ackReply)
 				if err != nil {
 					fmt.Println("error: ", err)
-					return
+				}else{
+					//we have heard back from higher node, want to start a timer later
+					receivedConfirmation = false;
 				}
-				//node.electionTimeout.Stop() //stop timer if the node hears back
-				//fmt.Println("Timer stopped!")
 			}(serverConnection)
 		}
 	}
 
+	if (receivedConfirmation){
+		//note that we don't need to protect node because it is on a single machine, no one else accessing
+		StartTimer(node)
+
+		go func() {
+			//thread for each node checking for timeout
+			<-node.electionTimeout.C
+	
+			// Printed when timer is fired
+			fmt.Println("timer inactivated")
+		}()
+	
+	}
 }
+	//use a flag 
 
 // resetElectionTimeout resets the election timeout to a new random duration.
 // This function should be called whenever an event occurs that prevents the need for a new election,
