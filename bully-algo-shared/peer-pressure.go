@@ -152,12 +152,12 @@ func StartTimer(node *RingNode) {
 }
 
 func (node *RingNode) LeaderElection() { 
-	if node.selfID != 1 {
+	if node.selfID != 3 {
 		return
 	}
 
 	receivedConfirmation := false
-
+	highestNode := true
 	node.mutex.Lock()
 	defer node.mutex.Unlock()
 
@@ -173,6 +173,7 @@ func (node *RingNode) LeaderElection() {
 	//for nodeID, serverConnection := range p2pConnection{
 	for nodeID, serverConnection := range node.peerConnections {
 		if nodeID > node.selfID {
+			highestNode = false
 			//wg.Add(1)   
 			// fmt.Println("server connection outside go call ", serverConnection)
 			fmt.Println("the node id ", nodeID, "is higher than my id ", node.selfID)
@@ -196,6 +197,23 @@ func (node *RingNode) LeaderElection() {
 	//wg.Wait()
 	fmt.Println("value of receivedConfirmation bool: ", receivedConfirmation, "\n");
 
+	if (highestNode){
+		fmt.Println("the leader node is: ", node.selfID)
+			arguments.ConfirmedLeader = node.selfID
+			node.leaderID = node.selfID;
+			//start confirmation round
+			for nodeID, serverConnection := range node.peerConnections {
+					// fmt.Println("server connection outside go call ", serverConnection)
+					fmt.Println("confirmation round for ", nodeID)
+					go func(serverConnection *rpc.Client) {
+						fmt.Println("server connection: ", node.peerConnections[nodeID])
+						err := serverConnection.Call("RingNode.RequestVote", arguments, &ackReply)
+						if err != nil {
+							fmt.Println("error: ", err)
+						}
+					}(serverConnection)
+			}
+	}
 	if (receivedConfirmation){
 		fmt.Println("go into flag for starting timer\n");
 		//note that we don't need to protect node because it is on a single machine, no one else accessing
