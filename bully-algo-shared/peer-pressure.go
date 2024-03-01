@@ -26,7 +26,7 @@ type RingNode struct {
 	//peerConnections ServerConnections
 	nominatedSelf   bool
 	electionTimeout *time.Timer
-	peerConnections map[int]*rpc.Client
+	peerConnections map[int]*rpc.Client 
 }
 
 // RingVote contains the candidate's information that is needed for the
@@ -35,7 +35,7 @@ type RingNode struct {
 type PeerMessage struct {
 	MessengerID int
 	//IsTerminalLeader:  false,
-	//ConfirmedNotLeader bool
+	ConfirmedLeader int
 }
 
 // ServerConnection represents a connection to another node in the Raft cluster.
@@ -54,45 +54,25 @@ type ServerConnection struct {
 // if less than server's own ID, the vote is ignored
 // if candidateID is the same as serverID, then election won, and server can confirm its leadership
 func (node *RingNode) RequestVote(receivedMessage PeerMessage, acknowledge *string) error {
-	// when request is received
-	// send OK acknowledgement
-	// contact higher nodes
 	node.mutex.Lock()
 	defer node.mutex.Unlock()
 
 	prevID := receivedMessage.MessengerID
 	arguments := PeerMessage{
 		MessengerID: node.selfID,
-		// ConfirmedNotLeader: false, //if a node's timer runs out and this is false, that node must be the leader
-		//message
+		ConfirmedLeader: -1,
 	}
+
+	//does this node hear back from higher nodes
+	receivedConfirmation := false
 
 	ackReply := "nil"
 
 	if prevID < node.selfID {
-		// do we need to check if the timer has already started?
-		//also do we start timer before we alert higher nodes or just after we hear from smaller nodes
-		//if node.electionTimeout == nil {
-		//StartTimer(node)
-		/*go func() {
-			//thread for each node checking for timeout
-			//lock vs unlock here?
-			<-node.electionTimeout.C
-
-			// Printed when timer is fired
-			fmt.Println("timer inactivated")
-		}()*/
+		
 		//}
 		//send confirmation back
 		fmt.Print("received alert from node ", prevID)
-		// go func(serverConnection *rpc.Client) {
-		// 	fmt.Print("sending confirmation back")
-		// 	err := node.peerConnections[prevID].Call("RingNode.RequestVote", arguments, &ackReply)
-		// 	if err != nil {
-		// 		return
-		// 	}
-		// }(node.peerConnections[prevID])
-
 		//alert higher nodes
 		for nodeID, serverConnection := range node.peerConnections {
 			if nodeID > node.selfID {
@@ -104,18 +84,55 @@ func (node *RingNode) RequestVote(receivedMessage PeerMessage, acknowledge *stri
 					err := serverConnection.Call("RingNode.RequestVote", arguments, &ackReply)
 					if err != nil {
 						fmt.Println("error: ", err)
-						return
+					}else{
+						//we have heard back from higher node, want to start a timer later
+						fmt.Println("confirmation received from higher node ", nodeID);
+						receivedConfirmation = true;	
 					}
-					//if there is no error, must have received confirmaiton from higher node, can't be leader
-					//node.electionTimeout.Stop() //stop timer if the node hears back
 				}(serverConnection)
+				time.Sleep(1 * time.Second)
+			}
+		}
 
+		if (receivedConfirmation){
+			fmt.Println("go into flag for starting timer\n");
+			//note that we don't need to protect node because it is on a single machine, no one else accessing
+			StartTimer(node)
+	
+			go func() {
+				//thread for each node checking for timeout
+				<-node.electionTimeout.C
+		
+				// Printed when timer is fired
+				fmt.Println("timer inactivated")
+			}()
+		
+		}else{
+			fmt.Println("the leader node is: ", node.selfID)
+			arguments.ConfirmedLeader = node.selfID
+			node.leaderID = node.selfID;
+			//start confirmation round
+			for nodeID, serverConnection := range node.peerConnections {
+					// fmt.Println("server connection outside go call ", serverConnection)
+					fmt.Println("confirmation round for ", nodeID)
+					go func(serverConnection *rpc.Client) {
+						fmt.Println("server connection: ", node.peerConnections[nodeID])
+						err := serverConnection.Call("RingNode.RequestVote", arguments, &ackReply)
+						if err != nil {
+							fmt.Println("error: ", err)
+						}
+					}(serverConnection)
+	
 			}
 		}
 
 	}
 
-	//ackReply := "nil"
+	if (receivedMessage.ConfirmedLeader != -1) {
+		fmt.Println("node ", node.selfID, "confirms that node ", prevID, "is the leader");
+		node.leaderID = receivedMessage.ConfirmedLeader
+	}
+
 
 	// Leader has been identified
 	var wg sync.WaitGroup
@@ -134,17 +151,6 @@ func StartTimer(node *RingNode) {
 
 }
 
-func CheckNodeTimers() {
-	//call this as a thread working continuosuly in the background
-	for i := 0; i < len(nodeList); {
-		//currNode := nodeList[i]
-		//<- currNode.electionTimeout.C{
-		//	fmt.Println()
-		// if (currNode.electionTimeout.C){
-		// }
-	}
-}
-
 func (node *RingNode) LeaderElection() { 
 	if node.selfID != 1 {
 		return
@@ -157,14 +163,17 @@ func (node *RingNode) LeaderElection() {
 
 	arguments := PeerMessage{
 		MessengerID: node.selfID,
+		ConfirmedLeader: -1,
 		// ConfirmedNotLeader: false, //if a node's timer runs out and this is false, that node must be the leader
 	}
 	ackReply := "nil"
 
 	fmt.Println("peerConnections ", node.peerConnections)
+	//var wg sync.WaitGroup
 	//for nodeID, serverConnection := range p2pConnection{
 	for nodeID, serverConnection := range node.peerConnections {
 		if nodeID > node.selfID {
+			//wg.Add(1)   
 			// fmt.Println("server connection outside go call ", serverConnection)
 			fmt.Println("the node id ", nodeID, "is higher than my id ", node.selfID)
 			fmt.Println("Alerting higher node ", nodeID)
@@ -175,13 +184,20 @@ func (node *RingNode) LeaderElection() {
 					fmt.Println("error: ", err)
 				}else{
 					//we have heard back from higher node, want to start a timer later
-					receivedConfirmation = false;
+					fmt.Println("confirmation received from higher node ", nodeID);
+					receivedConfirmation = true;
+					
 				}
 			}(serverConnection)
+			time.Sleep(1 * time.Second)
 		}
+		//wg.Wait()
 	}
+	//wg.Wait()
+	fmt.Println("value of receivedConfirmation bool: ", receivedConfirmation, "\n");
 
 	if (receivedConfirmation){
+		fmt.Println("go into flag for starting timer\n");
 		//note that we don't need to protect node because it is on a single machine, no one else accessing
 		StartTimer(node)
 
@@ -303,4 +319,5 @@ func main() {
 	wg.Add(1)
 	go node.LeaderElection() // Concurrent leader election, which can be made non-stop with timers
 	wg.Wait()                // Waits forever, so main process does not stop
+
 }
