@@ -157,7 +157,7 @@ func StartTimer(node *RingNode) {
 	//defer node.mutex.Unlock()
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	tRandom := time.Duration(r.Intn(150)+151) * time.Millisecond
-	node.electionTimeout = time.NewTimer(tRandom * 10) 
+	node.electionTimeout = time.NewTimer(tRandom) 
 	fmt.Println("Timer started")
 
 }
@@ -175,7 +175,6 @@ func (node *RingNode) LeaderElection() {
 	arguments := PeerMessage{
 		MessengerID: node.selfID,
 		ConfirmedLeader: -1,
-		// ConfirmedNotLeader: false, //if a node's timer runs out and this is false, that node must be the leader
 	}
 	ackReply := "nil"
 
