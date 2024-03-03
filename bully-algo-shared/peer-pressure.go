@@ -108,12 +108,21 @@ func (node *RingNode) RequestVote(receivedMessage PeerMessage, acknowledge *stri
 			}()
 		
 		}else{
-			fmt.Println("the leader node is: ", node.selfID)
-			arguments.ConfirmedLeader = node.selfID
-			node.leaderID = node.selfID;
-			//start confirmation round
-			for nodeID, serverConnection := range node.peerConnections {
-					// fmt.Println("server connection outside go call ", serverConnection)
+			fmt.Println("in highest node section");
+			StartTimer(node)
+	
+			go func() {
+				//thread for each node checking for timeout
+				<-node.electionTimeout.C
+		
+				// Printed when timer is fired
+				fmt.Println("timer inactivated")
+				fmt.Println("the leader node is: ", node.selfID)
+				arguments.ConfirmedLeader = node.selfID
+				node.leaderID = node.selfID;
+				//start confirmation round
+				for nodeID, serverConnection := range node.peerConnections {
+						// fmt.Println("server connection outside go call ", serverConnection)
 					fmt.Println("confirmation round for ", nodeID)
 					go func(serverConnection *rpc.Client) {
 						fmt.Println("server connection: ", node.peerConnections[nodeID])
@@ -123,7 +132,9 @@ func (node *RingNode) RequestVote(receivedMessage PeerMessage, acknowledge *stri
 						}
 					}(serverConnection)
 	
-			}
+				}
+			}()
+		
 		}
 
 	}
@@ -146,13 +157,13 @@ func StartTimer(node *RingNode) {
 	//defer node.mutex.Unlock()
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	tRandom := time.Duration(r.Intn(150)+151) * time.Millisecond
-	node.electionTimeout = time.NewTimer(tRandom)
+	node.electionTimeout = time.NewTimer(tRandom * 10) 
 	fmt.Println("Timer started")
 
 }
 
 func (node *RingNode) LeaderElection() { 
-	if node.selfID != 3 {
+	if node.selfID != 1 {
 		return
 	}
 
